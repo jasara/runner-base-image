@@ -89,7 +89,7 @@ RUN systemctl enable fireactions.service
 RUN apt-get update -y \
     && add-apt-repository ppa:ondrej/php \
     && apt-get update -y \
-    && apt-get install php8.4-cli php8.4-gd php8.4-opentelemetry php8.4-grpc php8.4-protobuf php8.4-pcov php8.4-simplexml php8.4-dom php8.4-curl php8.4-pgsql php8.4-zip php8.4-xml php8.4-redis -y \
+    && apt-get install php8.4-cli php8.4-gd php8.4-opentelemetry php8.4-grpc php8.4-protobuf php8.4-pcov php8.4-simplexml php8.4-dom php8.4-curl php8.4-pgsql php8.4-zip php8.4-xml php8.4-redis php8.4-mbstring -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer /usr/bin/composer /usr/bin/composer
