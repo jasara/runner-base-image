@@ -1,4 +1,4 @@
-FROM ghcr.io/hostinger/fireactions:0.2.8 AS fireactions
+FROM ghcr.io/hostinger/fireactions:0.3.1 AS fireactions
 FROM composer:2.8.5 AS composer
 FROM ubuntu:24.04
 
