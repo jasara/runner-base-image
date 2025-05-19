@@ -1,5 +1,5 @@
 FROM ghcr.io/hostinger/fireactions:0.2.8 AS fireactions
-FROM composer:2.8.5 AS composer
+FROM composer:2.8.9 AS composer
 FROM ubuntu:24.04
 
 ARG RUNNER_VERSION=2.322.0
