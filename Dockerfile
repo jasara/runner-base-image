@@ -109,3 +109,25 @@ RUN mkdir /tmp/awscli_env/ && \
     unzip awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip && \
     ./aws/install && \
     rm -rf /tmp/awscli_env/
+
+# Install PostgreSQL client
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright system dependencies for Chromium
+# These are the minimal deps needed - browser binaries are installed at runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libnss3 \
+        libatk-bridge2.0-0 \
+        libdrm2 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxrandr2 \
+        libgbm1 \
+        libxkbcommon0 \
+        libasound2t64 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
