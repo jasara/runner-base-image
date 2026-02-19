@@ -4,6 +4,52 @@ set -e
 CONTAINER_NAME="${CONTAINER_NAME:-dev}"
 IMAGE="${IMAGE:-base-developer-image:latest}"
 SSH_PORT="${SSH_PORT:-2222}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if ! command -v ngrok &>/dev/null; then
+    echo "ngrok is not installed. Install it with:"
+    echo "  brew install ngrok/ngrok/ngrok"
+    echo "Then authenticate: ngrok config add-authtoken <your-token>"
+    exit 1
+fi
+
+NGROK_ADDR="3.tcp.ngrok.io:20785"
+
+start_tunnel() {
+    local tunnel_log
+    tunnel_log=$(mktemp)
+    ngrok tcp --url "tcp://${NGROK_ADDR}" "${SSH_PORT}" > "${tunnel_log}" 2>&1 &
+
+    echo "Starting ngrok tunnel..."
+    local ready=false
+    for _ in $(seq 1 30); do
+        if curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -q "public_url"; then
+            ready=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" = false ]; then
+        echo "Warning: ngrok tunnel failed to start."
+        echo "ngrok output:"
+        cat "${tunnel_log}"
+        rm -f "${tunnel_log}"
+        return
+    fi
+    rm -f "${tunnel_log}"
+
+    echo ""
+    echo "ngrok tunnel: tcp://${NGROK_ADDR}"
+    echo ""
+    echo "Termius connection:"
+    echo "  Host: ${NGROK_ADDR%%:*}"
+    echo "  Port: ${NGROK_ADDR##*:}"
+    echo "  User: dev"
+    echo ""
+    echo "Or plain SSH:"
+    echo "  ssh dev@${NGROK_ADDR%%:*} -p ${NGROK_ADDR##*:}"
+}
 
 prompt_secret() {
     local var_name="$1"
@@ -42,19 +88,21 @@ fi
 
 # SSH auth — prefer authorized key, fall back to password
 SSH_AUTHORIZED_KEY="${SSH_AUTHORIZED_KEY:-$(cat ~/.ssh/id_ed25519.pub 2>/dev/null || cat ~/.ssh/id_rsa.pub 2>/dev/null || true)}"
+if [ -f "${SCRIPT_DIR}/.ssh_keys" ]; then
+    SSH_AUTHORIZED_KEY="${SSH_AUTHORIZED_KEY:+${SSH_AUTHORIZED_KEY}$'\n'}$(cat "${SCRIPT_DIR}/.ssh_keys")"
+fi
 if [ -z "$SSH_AUTHORIZED_KEY" ] && [ -z "$SSH_PASSWORD" ]; then
     echo "SSH key: no public key found in ~/.ssh/"
     SSH_PASSWORD="$(prompt_secret SSH_PASSWORD "SSH password for the dev user")"
 fi
 
-# Remove existing container if stopped
+# Remove existing container (stop first if running)
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        echo "Container '${CONTAINER_NAME}' is already running."
-        echo "SSH: ssh dev@localhost -p ${SSH_PORT}"
-        exit 0
+        echo "Stopping running container '${CONTAINER_NAME}'..."
+        docker stop "${CONTAINER_NAME}"
     fi
-    echo "Removing stopped container '${CONTAINER_NAME}'..."
+    echo "Removing container '${CONTAINER_NAME}'..."
     docker rm "${CONTAINER_NAME}"
 fi
 
@@ -77,6 +125,10 @@ docker run -d \
 echo "Started. Waiting for sshd..."
 sleep 2
 
+docker cp "${SCRIPT_DIR}/overlay/usr/local/bin/work.sh" "${CONTAINER_NAME}:/usr/local/bin/work.sh"
+docker exec "${CONTAINER_NAME}" chmod +x /usr/local/bin/work.sh
+
 ssh-keygen -R "[localhost]:${SSH_PORT}" 2>/dev/null || true
 
 echo "SSH: ssh dev@localhost -p ${SSH_PORT}"
+start_tunnel

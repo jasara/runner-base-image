@@ -149,7 +149,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
     && rm -f /root/.local/bin/claude
 
 COPY overlay/usr/local/bin/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/dev-setup
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/dev-setup /usr/local/bin/work.sh
 
 # Install jasara-cli (private repo — requires github_token build secret)
 RUN --mount=type=secret,id=github_token \

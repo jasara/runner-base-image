@@ -13,19 +13,14 @@ else
     echo "  GH_TOKEN not set — skipping gh"
 fi
 
-# Claude Code — CLAUDE_CODE_OAUTH_TOKEN is read automatically by claude;
-# fall back to writing primaryApiKey if only ANTHROPIC_API_KEY is provided
-if [ -n "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
-    echo "✓ Claude Code ready (OAuth token)"
-elif [ -n "${ANTHROPIC_API_KEY}" ]; then
-    mkdir -p ~/.claude
-    echo "{\"primaryApiKey\":\"${ANTHROPIC_API_KEY}\"}" > ~/.claude.json
-    echo "✓ Claude Code configured (API key)"
+# Claude Code — credentials written to ~/.claude/.credentials.json at container start
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN}" ] || [ -n "${ANTHROPIC_API_KEY}" ]; then
+    echo "✓ Claude Code ready"
 else
     echo "  CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY not set — skipping Claude"
 fi
 
-# Infisical — machine identity login writes credentials; INFISICAL_TOKEN is read automatically
+#Infisical — machine identity login writes credentials; INFISICAL_TOKEN is read automatically
 if [ -n "${INFISICAL_CLIENT_ID}" ] && [ -n "${INFISICAL_CLIENT_SECRET}" ]; then
     infisical login \
         --method=universal-auth \

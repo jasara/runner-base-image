@@ -8,6 +8,21 @@ for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN INFISICAL_TOKEN \
     fi
 done
 
+# Pre-configure Claude Code so it doesn't show the setup wizard
+mkdir -p /home/dev/.claude
+printf '{"theme":"dark","skipDangerousModePermissionPrompt":true}' > /home/dev/.claude/settings.json
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+    printf '{"claudeAiOauth":{"accessToken":"%s","expiresAt":9999999999999,"refreshToken":""}}' \
+        "${CLAUDE_CODE_OAUTH_TOKEN}" > /home/dev/.claude/.credentials.json
+    printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"1.0.17"}' \
+        > /home/dev/.claude.json
+elif [ -n "${ANTHROPIC_API_KEY}" ]; then
+    printf '{"primaryApiKey":"%s","hasCompletedOnboarding":true,"lastOnboardingVersion":"1.0.17"}' \
+        "${ANTHROPIC_API_KEY}" > /home/dev/.claude.json
+fi
+chown -R dev:dev /home/dev/.claude
+chown dev:dev /home/dev/.claude.json 2>/dev/null || true
+
 # Generate SSH host keys if missing and start sshd
 ssh-keygen -A
 mkdir -p /run/sshd
