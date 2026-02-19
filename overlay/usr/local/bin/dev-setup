@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Authenticate developer tools using environment variables.
+# Run this after SSH-ing into the container.
+# Credentials are passed via docker run -e and exported to the session via /etc/environment.
+
+echo "Setting up developer tools..."
+
+# GitHub CLI — GH_TOKEN in environment is enough; gh reads it automatically
+if [ -n "${GH_TOKEN}" ]; then
+    echo "✓ GitHub CLI ready ($(gh api user -q .login 2>/dev/null || echo 'GH_TOKEN set'))"
+else
+    echo "  GH_TOKEN not set — skipping gh"
+fi
+
+# Claude Code — CLAUDE_CODE_OAUTH_TOKEN is read automatically by claude;
+# fall back to writing primaryApiKey if only ANTHROPIC_API_KEY is provided
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+    echo "✓ Claude Code ready (OAuth token)"
+elif [ -n "${ANTHROPIC_API_KEY}" ]; then
+    mkdir -p ~/.claude
+    echo "{\"primaryApiKey\":\"${ANTHROPIC_API_KEY}\"}" > ~/.claude.json
+    echo "✓ Claude Code configured (API key)"
+else
+    echo "  CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY not set — skipping Claude"
+fi
+
+# Infisical — machine identity login writes credentials; INFISICAL_TOKEN is read automatically
+if [ -n "${INFISICAL_CLIENT_ID}" ] && [ -n "${INFISICAL_CLIENT_SECRET}" ]; then
+    infisical login \
+        --method=universal-auth \
+        --client-id="${INFISICAL_CLIENT_ID}" \
+        --client-secret="${INFISICAL_CLIENT_SECRET}" \
+        --silent
+    echo "✓ Infisical authenticated (machine identity)"
+elif [ -n "${INFISICAL_TOKEN}" ]; then
+    echo "✓ Infisical ready (user token)"
+else
+    echo "  INFISICAL_TOKEN / INFISICAL_CLIENT_ID not set — skipping Infisical"
+fi
+
+echo "Done."
