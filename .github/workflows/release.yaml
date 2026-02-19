@@ -42,4 +42,4 @@ jobs:
             ghcr.io/jasara/base-developer-image/ubuntu24.04:${{ github.sha }}
             ghcr.io/jasara/base-developer-image/ubuntu24.04:latest
           secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}
+            github_token=${{ secrets.JASARA_CI_PRIVATE_REPO_ACCESS_KEY }}
