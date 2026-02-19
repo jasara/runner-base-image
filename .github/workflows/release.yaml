@@ -39,5 +39,7 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ghcr.io/jasara/runner-base-image/ubuntu24.04:${{ github.sha }}
-            ghcr.io/jasara/runner-base-image/ubuntu24.04:latest
+            ghcr.io/jasara/base-developer-image/ubuntu24.04:${{ github.sha }}
+            ghcr.io/jasara/base-developer-image/ubuntu24.04:latest
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}

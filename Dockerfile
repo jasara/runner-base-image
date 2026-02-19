@@ -1,10 +1,10 @@
-FROM ghcr.io/hostinger/fireactions:2.0.3 AS fireactions
 FROM composer:2.9.5 AS composer
 FROM ubuntu:24.04
 
-ARG RUNNER_VERSION=2.322.0
 ARG KUBECTL_VERSION=1.32.2
 ARG AWSCLI_VERSION=2.24.6
+ARG GH_VERSION=2.87.0
+ARG CLAUDE_VERSION=2.1.47
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -25,8 +25,6 @@ RUN apt-get update -y                              \
     pkg-config                                     \
     libssl-dev                                     \
     net-tools                                      \
-    openssh-server                                 \
-    haveged                                        \
     sudo                                           \
     systemd                                        \
     udev                                           \
@@ -40,24 +38,8 @@ RUN apt-get update -y                              \
     vim-tiny                                       \
     wget
 
-RUN systemctl enable haveged.service
-
 RUN update-alternatives --set iptables /usr/sbin/iptables-legacy && \
     update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
-
-RUN adduser --disabled-password --gecos "" --uid 1001 runner  \
-    && groupadd docker --gid 121                              \
-    && usermod -aG docker runner                              \
-    && usermod -aG sudo runner                                \
-    && echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" > /etc/sudoers
-
-RUN case "$TARGETARCH" in amd64|x86_64|i386) export RUNNER_ARCH="x64";; arm64) export RUNNER_ARCH="arm64";; esac                                                         \
-    && mkdir -p /opt/runner /opt/hostedtoolcache && cd /opt/runner                                                                                                 \
-    && curl -fLo runner.tar.gz https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz \
-    && tar xzf ./runner.tar.gz && rm -rf runner.tar.gz                                                                                                             \
-    && ./bin/installdependencies.sh                                                                                                                                \
-    && chown -R runner:docker /opt/runner /opt/hostedtoolcache                                                                                                     \
-    && chmod -R 777 /opt/hostedtoolcache
 
 RUN install -m 0755 -d /etc/apt/keyrings                                                                            \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg      \
@@ -74,48 +56,62 @@ RUN install -m 0755 -d /etc/apt/keyrings                                        
     && apt-get clean && rm -rf /var/lib/apt/lists/*                                                                 \
     && systemctl enable docker.service
 
-RUN echo 'root:fireactions' | chpasswd                                                                   \
-    && sed -i -e 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
-    && sed -i -e 's/^AcceptEnv LANG LC_\*$/#AcceptEnv LANG LC_*/'            /etc/ssh/sshd_config
-
 RUN echo "" > /etc/machine-id && echo "" > /var/lib/dbus/machine-id
 
-COPY overlay/etc /etc
-COPY --from=fireactions /usr/bin/fireactions /usr/bin/fireactions
+RUN adduser --disabled-password --gecos "" dev \
+    && usermod -aG sudo,docker dev \
+    && echo "%sudo ALL=(ALL:ALL) NOPASSWD:ALL" > /etc/sudoers.d/nopasswd
 
-RUN systemctl enable fireactions.service
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server \
+    tmux \
+    dbus-x11 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/^session.*required.*pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd
 
-# Install PHP and dependencies
+# Install PHP and dependencies (grpc built from source via PECL — see grpc/grpc#34278)
 RUN apt-get update -y \
     && add-apt-repository ppa:ondrej/php \
     && apt-get update -y \
-    && apt-get install php8.5-cli php8.5-gd php8.5-opentelemetry php8.5-grpc php8.5-protobuf php8.5-pcov php8.5-simplexml php8.5-dom php8.5-curl php8.5-pgsql php8.5-zip php8.5-xml php8.5-redis php8.5-mbstring php8.5-gmp php8.5-sqlite3 php8.5-bcmath php8.5-intl -y \
+    && apt-get install -y php8.5-cli php8.5-dev php8.5-gd php8.5-opentelemetry php8.5-protobuf php8.5-pcov php8.5-simplexml php8.5-dom php8.5-curl php8.5-pgsql php8.5-zip php8.5-xml php8.5-redis php8.5-mbstring php8.5-gmp php8.5-sqlite3 php8.5-bcmath php8.5-intl zlib1g-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Build grpc PHP extension from source (PPA package has PHP 8.5 symbol incompatibility)
+# MAKEFLAGS parallelises the build; strip removes debug symbols (~50MB → ~5MB)
+RUN pecl channel-update pecl.php.net \
+    && MAKEFLAGS="-j$(nproc)" pecl install grpc \
+    && strip --strip-debug "$(php -r 'echo ini_get("extension_dir");')/grpc.so" \
+    && echo "extension=grpc.so" > /etc/php/8.5/mods-available/grpc.ini \
+    && phpenmod grpc
 
 COPY --from=composer /usr/bin/composer /usr/bin/composer
 
 # Install Kubectl
-RUN mkdir /tmp/kubectl_env/ && \
-    cd /tmp/kubectl_env/ && \
-    curl -LO "https://dl.k8s.io/release/v$KUBECTL_VERSION/bin/linux/amd64/kubectl" && \
-    chmod +x kubectl && \
-    mv ./kubectl /usr/local/bin/kubectl && \
-    rm -rf /tmp/kubectl_env/
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fLo /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
+    && chmod +x /usr/local/bin/kubectl
 
-# Install AWS cli
-RUN mkdir /tmp/awscli_env/ && \
-    cd /tmp/awscli_env/ && \
-    wget "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" && \
-    unzip awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip && \
-    ./aws/install && \
-    rm -rf /tmp/awscli_env/
+# Install AWS CLI
+RUN case "$(dpkg --print-architecture)" in \
+        amd64) AWS_ARCH="x86_64" ;; \
+        arm64) AWS_ARCH="aarch64" ;; \
+    esac \
+    && mkdir /tmp/awscli_env/ \
+    && cd /tmp/awscli_env/ \
+    && wget "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}-${AWSCLI_VERSION}.zip" \
+    && unzip "awscli-exe-linux-${AWS_ARCH}-${AWSCLI_VERSION}.zip" \
+    && ./aws/install \
+    && rm -rf /tmp/awscli_env/
 
-# Install PostgreSQL client
+# Install PostgreSQL server and client
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client-16 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && systemctl enable postgresql
 
 # Install Playwright system dependencies for Chromium
 # These are the minimal deps needed - browser binaries are installed at runtime
@@ -131,3 +127,43 @@ RUN apt-get update \
         libxkbcommon0 \
         libasound2t64 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" \
+        -o /tmp/gh.tar.gz \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${ARCH}/bin/gh" /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${ARCH}"
+
+# Install Infisical CLI
+RUN curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends infisical \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code (move versioned binary system-wide so non-root users can execute it)
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}" \
+    && mv /root/.local/share/claude /usr/local/share/claude \
+    && ln -sf /usr/local/share/claude/versions/${CLAUDE_VERSION} /usr/local/bin/claude \
+    && rm -f /root/.local/bin/claude
+
+COPY overlay/usr/local/bin/ /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/dev-setup
+
+# Install jasara-cli (private repo — requires github_token build secret)
+RUN --mount=type=secret,id=github_token \
+    ARCH=$(dpkg --print-architecture) \
+    && GH_TOKEN=$(cat /run/secrets/github_token) \
+    gh release download \
+        --repo jasara/jasara-cli \
+        --pattern "*linux*${ARCH}*.tar.gz" \
+        --dir /tmp/jasara \
+    && tar -xzf /tmp/jasara/*.tar.gz -C /tmp/jasara \
+    && find /tmp/jasara -maxdepth 1 -type f -perm /111 -exec install -m 0755 {} /usr/local/bin/jasara-cli \; \
+    && rm -rf /tmp/jasara
+
+EXPOSE 22
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["sleep", "infinity"]
